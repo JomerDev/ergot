@@ -59,7 +59,7 @@ pub async fn find_new_devices(devs: &HashSet<DeviceInfo>) -> Vec<NewDevice> {
 /// A helper function for finding new devices not contained in the provided `devs` set with a custom device filter.
 ///
 /// This function does not add new devices to `devs`, the caller will need to do that
-/// between calls to `find_new_devices`.
+/// between calls to `find_new_devices_with_filter`.
 pub async fn find_new_devices_with_filter<T: Fn(&nusb::DeviceInfo) -> bool>(devs: &HashSet<DeviceInfo>, filter: T) -> Vec<NewDevice> {
     trace!("Searching for new devices...");
     let mut out = vec![];
