@@ -53,10 +53,18 @@ fn device_match(d1: &nusb::DeviceInfo, d2: &nusb::DeviceInfo) -> bool {
 /// This function does not add new devices to `devs`, the caller will need to do that
 /// between calls to `find_new_devices`.
 pub async fn find_new_devices(devs: &HashSet<DeviceInfo>) -> Vec<NewDevice> {
+    find_new_devices_with_filter(devs, coarse_device_filter).await
+}
+
+/// A helper function for finding new devices not contained in the provided `devs` set with a custom device filter.
+///
+/// This function does not add new devices to `devs`, the caller will need to do that
+/// between calls to `find_new_devices`.
+pub async fn find_new_devices_with_filter<T: Fn(&nusb::DeviceInfo) -> bool>(devs: &HashSet<DeviceInfo>, filter: T) -> Vec<NewDevice> {
     trace!("Searching for new devices...");
     let mut out = vec![];
     let devices = nusb::list_devices().unwrap();
-    let devices = devices.filter(coarse_device_filter).collect::<Vec<_>>();
+    let devices = devices.filter(filter).collect::<Vec<_>>();
 
     for device in devices {
         let dinfo = DeviceInfo {
