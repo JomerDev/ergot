@@ -3,13 +3,13 @@ use core::{any::TypeId, ptr::NonNull};
 use cordyceps::List;
 use serde::Serialize;
 
-use crate::logging::{debug, error, trace};
+use crate::logging::{debug, error, trace, warn};
 
 use crate::{
     FrameKind, Header, HeaderSeq, ProtocolError,
     interface_manager::{self, InterfaceSendError, Profile},
     net_stack::NetStackSendError,
-    socket::{SocketHeader, SocketSendError, SocketVTable, borser},
+    socket::{BorSerFn, SocketHeader, SocketSendError, SocketVTable, borser},
 };
 
 use super::SocketHeaderIter;
@@ -84,6 +84,15 @@ where
                         debug!("{}: No local interest in msg broadcast", hdr);
                         // no need to report /errors/ on routing loops
                         continue;
+                    }
+                    Err(NetStackSendError::SocketSend(SocketSendError::NoSpace)) => {
+                        // A matched subscriber whose bounded queue is full: the
+                        // audience exists, the message is just best-effort dropped
+                        // for this listener (at-most-once delivery). Count it as a
+                        // recipient so an overflowed listener is not misreported as
+                        // "no route / no audience".
+                        debug!("{}: broadcast subscriber full, dropping", hdr);
+                        any_found = true;
                     }
                     // `e` is only used in the logging macro (no-op when internal logging is disabled)
                     #[allow(unused_variables)]
@@ -160,6 +169,15 @@ where
                         debug!("{}: No local interest in msg broadcast", hdr);
                         // no need to report /errors/ on routing loops
                         continue;
+                    }
+                    Err(NetStackSendError::SocketSend(SocketSendError::NoSpace)) => {
+                        // A matched subscriber whose bounded queue is full: the
+                        // audience exists, the message is just best-effort dropped
+                        // for this listener (at-most-once delivery). Count it as a
+                        // recipient so an overflowed listener is not misreported as
+                        // "no route / no audience".
+                        debug!("{}: broadcast subscriber full, dropping", hdr);
+                        any_found = true;
                     }
                     // `e` is only used in the logging macro (no-op when internal logging is disabled)
                     #[allow(unused_variables)]
@@ -326,7 +344,11 @@ where
         trace!("{}: Sending msg raw from {:?}", hdr, source);
 
         if hdr.kind == FrameKind::PROTOCOL_ERROR {
-            todo!("{}: Don't do that", hdr);
+            // A protocol-error frame must be sent through the error path
+            // (`send_err`), not a normal typed/raw/borrowed send. Reject it rather
+            // than panicking.
+            warn!("{}: refusing to send a protocol-error frame on a non-error path", hdr);
+            return Err(NetStackSendError::NoRoute);
         }
 
         let nshdr: Header = hdr.clone().into();
@@ -368,7 +390,11 @@ where
         trace!("{}: Sending msg ty", hdr);
 
         if hdr.kind == FrameKind::PROTOCOL_ERROR {
-            todo!("{}: Don't do that", hdr);
+            // A protocol-error frame must be sent through the error path
+            // (`send_err`), not a normal typed/raw/borrowed send. Reject it rather
+            // than panicking.
+            warn!("{}: refusing to send a protocol-error frame on a non-error path", hdr);
+            return Err(NetStackSendError::NoRoute);
         }
 
         // Is this a broadcast message?
@@ -376,14 +402,14 @@ where
             Self::broadcast(
                 sockets,
                 hdr,
-                |skt| Self::send_ty_to_socket(skt, t, hdr, seq_no),
+                |skt| Self::send_ty_to_socket(skt, t, hdr, seq_no, Some(borser::<T>)),
                 || manager.send(hdr, t),
             )
         } else {
             Self::unicast(
                 sockets,
                 hdr,
-                |skt| Self::send_ty_to_socket(skt, t, hdr, seq_no),
+                |skt| Self::send_ty_to_socket(skt, t, hdr, seq_no, Some(borser::<T>)),
                 || manager.send(hdr, t),
             )
         }
@@ -408,17 +434,23 @@ where
         trace!("{}: Sending msg ty", hdr);
 
         if hdr.kind == FrameKind::PROTOCOL_ERROR {
-            todo!("{}: Don't do that", hdr);
+            // A protocol-error frame must be sent through the error path
+            // (`send_err`), not a normal typed/raw/borrowed send. Reject it rather
+            // than panicking.
+            warn!("{}: refusing to send a protocol-error frame on a non-error path", hdr);
+            return Err(NetStackSendError::NoRoute);
         }
 
         // Is this a broadcast message?
+        // A non-`Serialize` local value cannot be delivered to a serialize-only
+        // "borrow" socket, so no serializer is supplied here.
         if hdr.dst.port_id == 255 {
             Self::broadcast_local(sockets, hdr, |skt| {
-                Self::send_ty_to_socket(skt, t, hdr, seq_no)
+                Self::send_ty_to_socket(skt, t, hdr, seq_no, None)
             })
         } else {
             Self::unicast_local(sockets, hdr, |skt| {
-                Self::send_ty_to_socket(skt, t, hdr, seq_no)
+                Self::send_ty_to_socket(skt, t, hdr, seq_no, None)
             })
         }
         .inspect_err(|e| {
@@ -442,7 +474,11 @@ where
         trace!("{}: Sending msg bor", hdr);
 
         if hdr.kind == FrameKind::PROTOCOL_ERROR {
-            todo!("{}: Don't do that", hdr);
+            // A protocol-error frame must be sent through the error path
+            // (`send_err`), not a normal typed/raw/borrowed send. Reject it rather
+            // than panicking.
+            warn!("{}: refusing to send a protocol-error frame on a non-error path", hdr);
+            return Err(NetStackSendError::NoRoute);
         }
 
         // Is this a broadcast message?
@@ -481,8 +517,13 @@ where
         } = self;
         trace!("{}: Sending msg err", hdr);
 
+        // A protocol error is a point-to-point reply; it cannot be unicast to the
+        // broadcast port (255). This is reachable from a peer via the router's
+        // `PacketTooBig` reply path when a received frame carried a reserved source
+        // port. Refuse it as undeliverable rather than panicking.
         if hdr.dst.port_id == 255 {
-            todo!("{}: Don't do that", hdr);
+            warn!("{}: refusing to send protocol error to broadcast port", hdr);
+            return Err(NetStackSendError::NoRoute);
         }
 
         Self::unicast_err(
@@ -625,11 +666,16 @@ where
     }
 
     /// Helper method for sending a type to a given socket
+    ///
+    /// `bor_ser` is `Some(borser::<T>)` when the caller's `T: Serialize` (so the
+    /// value can be delivered to a serialize-only "borrow" socket), and `None`
+    /// otherwise (a local-only send of a non-`Serialize` type).
     fn send_ty_to_socket<T: 'static + Clone>(
         this: NonNull<SocketHeader>,
         t: &T,
         hdr: &Header,
         seq_no: &mut u16,
+        bor_ser: Option<BorSerFn>,
     ) -> Result<(), NetStackSendError> {
         let vtable: &'static SocketVTable = {
             let skt_ref = unsafe { this.as_ref() };
@@ -646,9 +692,21 @@ where
                 seq
             });
             (f)(this, that, hdr, &TypeId::of::<T>()).map_err(NetStackSendError::SocketSend)
-        } else if let Some(_f) = vtable.recv_bor {
-            // TODO: support send borrowed
-            todo!()
+        } else if let Some(f) = vtable.recv_bor {
+            // The destination is a "borrow" (serialize-only) socket. Serialize the
+            // value at the *sender's* type. If the sender's type is not
+            // `Serialize` (a local-only send), it cannot be delivered here.
+            let Some(bor_ser) = bor_ser else {
+                return Err(NetStackSendError::SocketSend(SocketSendError::TypeMismatch));
+            };
+            let this: NonNull<()> = this.cast();
+            let that: NonNull<()> = NonNull::from(t).cast();
+            let hdr = hdr.to_headerseq_or_with_seq(|| {
+                let seq = *seq_no;
+                *seq_no = seq_no.wrapping_add(1);
+                seq
+            });
+            (f)(this, that, hdr, bor_ser).map_err(NetStackSendError::SocketSend)
         } else {
             // todo: keep going? If we found the "right" destination and
             // sending fails, then there's not much we can do. Probably: there

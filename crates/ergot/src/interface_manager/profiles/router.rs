@@ -407,6 +407,10 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize>
 {
     /// Create a new root router (no upstream) with the given RNG.
     pub fn new(rng: R) -> Self {
+        // Interface idents live in `0..N` cast to `u8`, so the ident space must fit
+        // in a u8. Reject `N > 255` at compile time instead of wrapping to an empty
+        // ident range (which would panic on the first interface registration).
+        const { assert!(N <= 255, "Router const N (ident space) must be <= 255") };
         Self {
             slots: heapless::Vec::new(),
             seed_routes: LeaseTable::new(),
@@ -422,6 +426,7 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize>
     /// discovers its net_id from incoming frames. Use [`UPSTREAM_IDENT`]
     /// when creating the upstream RxWorker.
     pub fn new_bridge(rng: R, upstream_sink: I::Sink) -> Self {
+        const { assert!(N <= 255, "Router const N (ident space) must be <= 255") };
         Self {
             slots: heapless::Vec::new(),
             seed_routes: LeaseTable::new(),
@@ -732,9 +737,7 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
 
     fn send<T: Serialize>(&mut self, hdr: &Header, data: &T) -> Result<(), InterfaceSendError> {
         let mut hdr = hdr.clone();
-        if hdr.decrement_ttl().is_err() {
-            return Err(InterfaceSendError::NoRouteToDest);
-        }
+        hdr.decrement_ttl()?;
 
         if hdr.dst.port_id == 255 {
             if hdr.any_all.is_none() {
@@ -744,7 +747,12 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
             let mut any_good = false;
             let mut genuine = None;
             for slot in self.slots.iter_mut() {
-                if hdr.dst.network_id == slot.net_id {
+                // Skip pending (not-yet-assigned) slots. The previous check
+                // (`hdr.dst.network_id == slot.net_id`) was equivalent for a normal
+                // broadcast (dst net_id 0) but inverted the meaning if a caller
+                // crafted a broadcast with a specific dst net_id, excluding exactly
+                // the named segment.
+                if slot.net_id == 0 {
                     continue;
                 }
                 let mut bhdr = hdr.clone();
@@ -776,9 +784,7 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
         source: Option<Self::InterfaceIdent>,
     ) -> Result<(), InterfaceSendError> {
         let mut hdr = hdr.clone();
-        if hdr.decrement_ttl().is_err() {
-            return Err(InterfaceSendError::NoRouteToDest);
-        }
+        hdr.decrement_ttl()?;
         let port = self.find(&hdr, source)?;
         port.send_err(&hdr, err)
     }
@@ -790,9 +796,7 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
         source: Self::InterfaceIdent,
     ) -> Result<(), InterfaceSendError> {
         let mut hdr = hdr.clone();
-        if hdr.decrement_ttl().is_err() {
-            return Err(InterfaceSendError::NoRouteToDest);
-        }
+        hdr.decrement_ttl()?;
 
         if hdr.dst.port_id == 255 {
             if hdr.any_all.is_none() {
@@ -887,6 +891,21 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
         {
             return Err(SetStateError::NetIdInUse);
         }
+        let old_net_id = self
+            .slots
+            .iter()
+            .find(|s| s.ident == ident)
+            .ok_or(SetStateError::InterfaceNotFound)?
+            .net_id;
+
+        // Purge node claims scoped to the net_id being replaced. Otherwise they
+        // linger and, if that net_id is later handed to a different interface,
+        // would validate foreign frames or block legitimate re-claims on the new
+        // bus. (deregister_interface does the same.)
+        if old_net_id != new_net_id {
+            self.node_claims.drop_scope(old_net_id);
+        }
+
         let slot = self
             .slots
             .iter_mut()
@@ -905,6 +924,12 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
     ) -> Result<SeedNetAssignment, SeedAssignmentError> {
         if self.has_upstream() {
             return Err(SeedAssignmentError::ProfileCantSeed);
+        }
+        // net_id 0 is the pending placeholder, not a real source segment. Reject it
+        // explicitly so a request arriving on a not-yet-assigned slot can't match a
+        // pending slot and be granted an assignment scoped to net 0.
+        if source_net == 0 {
+            return Err(SeedAssignmentError::UnknownSource);
         }
         let now = Instant::now();
         self.seed_routes.gc(now);
@@ -1250,8 +1275,10 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
         let now = Instant::now();
         self.node_claims.gc(now);
 
-        // Verify source net_id belongs to a known interface.
-        if !self.slots.iter().any(|s| s.net_id == source_net) {
+        // Verify source net_id belongs to a known interface. net_id 0 is the
+        // pending placeholder, so reject it explicitly rather than letting it match
+        // a not-yet-assigned slot and grant a claim scoped to net 0.
+        if source_net == 0 || !self.slots.iter().any(|s| s.net_id == source_net) {
             return Err(AddressClaimError::UnknownSource);
         }
 
@@ -1311,11 +1338,24 @@ impl<I: Interface, R: RngCore, const N: usize, const S: usize, const C: usize> P
             .get_mut(node_id, source_net)
             .ok_or(AddressRefreshError::UnknownNodeId)?;
 
-        match entry.kind.refresh(req_token, now, new_token, false) {
-            Ok((lease, _)) => Ok(NodeClaimAssignment {
+        // `allow_replay = true`: if our rotated-token response was lost, the device
+        // retries with the previous token. Accept that as an idempotent replay
+        // (mirroring the seed refresh path) so a single lost response can't force
+        // the lease to expire and lock the device off the bus.
+        match entry.kind.refresh(req_token, now, new_token, true) {
+            Ok((lease, replayed)) => Ok(NodeClaimAssignment {
                 node_id,
                 net_id: source_net,
-                expires_seconds: MAX_LEASE_SECS,
+                // A replay is idempotent and does NOT extend the lease, so report
+                // the lease's actual remaining time (relative to now) rather than a
+                // fresh full lease — otherwise the client would schedule its next
+                // refresh too late and let the claim expire. A real refresh did
+                // extend to MAX_LEASE_SECS. Mirrors the seed refresh path.
+                expires_seconds: if replayed {
+                    remaining_lease_seconds(lease.expiration, now)
+                } else {
+                    MAX_LEASE_SECS
+                },
                 max_refresh_seconds: MAX_LEASE_SECS,
                 min_refresh_seconds: MIN_REFRESH_SECS,
                 refresh_token: lease.refresh_token.to_le_bytes(),
@@ -1454,13 +1494,15 @@ where
         nsh: &N,
         ident: <<N as crate::net_stack::NetStackHandle>::Profile as crate::interface_manager::Profile>::InterfaceIdent,
     ) -> bool {
-        // Sync net_id from the stack if still at the pending placeholder (0).
-        // This handles the case where `reassign_interface_net_id` updated the
-        // slot after this processor was created with `RouterFrameProcessor::new(0)`.
-        if self.net_id == 0
-            && let Some(InterfaceState::Active { net_id, .. }) = nsh
-                .stack()
-                .manage_profile(|im| im.interface_state(ident.clone()))
+        // Keep net_id in sync with the interface slot. It starts at the pending
+        // placeholder (0) and is set once the slot is assigned a net_id, but the
+        // slot can also be *re*assigned later (e.g. a bridge downstream that
+        // re-seeds after losing its parent lease). Re-read it every frame rather
+        // than only while it is still 0, so a reassignment cannot leave this
+        // processor rewriting addresses with a stale net_id.
+        if let Some(InterfaceState::Active { net_id, .. }) = nsh
+            .stack()
+            .manage_profile(|im| im.interface_state(ident.clone()))
         {
             self.net_id = net_id;
         }
@@ -1588,19 +1630,28 @@ pub fn process_frame<N>(
                 "{} packet too big for outgoing interface (mtu={})",
                 hdr, mtu
             );
-            let err_hdr = Header {
-                src: hdr.dst,
-                dst: hdr.src,
-                any_all: None,
-                seq_no: Some(hdr.seq_no),
-                kind: crate::FrameKind::PROTOCOL_ERROR,
-                ttl: crate::DEFAULT_TTL,
-            };
-            let _ = nsh.stack().send_err(
-                &err_hdr,
-                ProtocolError::IsePacketTooBig { mtu },
-                Some(ident),
-            );
+            // The error reply is unicast back to the original source. If that
+            // source port is a reserved port (0 = wildcard, 255 = broadcast) there
+            // is no valid destination to reply to, so skip the reply entirely
+            // rather than build an undeliverable one. `send_err` also guards this,
+            // but we avoid the doomed work here.
+            if hdr.src.port_id == 0 || hdr.src.port_id == 255 {
+                debug!("{} PacketTooBig from reserved src port; no reply", hdr);
+            } else {
+                let err_hdr = Header {
+                    src: hdr.dst,
+                    dst: hdr.src,
+                    any_all: None,
+                    seq_no: Some(hdr.seq_no),
+                    kind: crate::FrameKind::PROTOCOL_ERROR,
+                    ttl: crate::DEFAULT_TTL,
+                };
+                let _ = nsh.stack().send_err(
+                    &err_hdr,
+                    ProtocolError::IsePacketTooBig { mtu },
+                    Some(ident),
+                );
+            }
         }
         Err(e) => {
             warn!("{} recv->send error: {:?}", hdr, e);

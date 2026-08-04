@@ -170,11 +170,22 @@ mod bbq {
     /// only remaining drop cause is a genuinely full queue (consumer
     /// behind). At exactly `Q/2` there is a ~4-byte dead band of pointer
     /// positions where an empty ring cannot take the frame.
-    pub(super) const MAX_FRAME_SIZE: usize = if DEFMT_SINK_BUF_SIZE > 16 {
-        DEFMT_SINK_BUF_SIZE / 2 - 4
-    } else {
-        DEFMT_SINK_BUF_SIZE
-    };
+    // The exact-size grant scheme requires the frame cap strictly below half the
+    // ring. A buffer of 16 or fewer bytes would degenerate (the fallback set
+    // MAX_FRAME_SIZE == the whole buffer), reintroducing the permanent-drop dead
+    // zone that the half-ring cap exists to avoid. Require a sane minimum instead.
+    const _: () = assert!(
+        DEFMT_SINK_BUF_SIZE > 16,
+        "DEFMT_SINK_BUFFER_SIZE must be greater than 16"
+    );
+    pub(super) const MAX_FRAME_SIZE: usize = DEFMT_SINK_BUF_SIZE / 2 - 4;
+
+    // A frame is granted and committed with `pos as u16` (see `FrameAccumulator`),
+    // so `MAX_FRAME_SIZE` must fit in a `u16`; otherwise `pos as u16` would silently
+    // truncate and the subsequent `grant[..pos]` would panic out of bounds inside
+    // defmt's critical section. Enforce it at compile time, so an oversized
+    // `DEFMT_SINK_BUFFER_SIZE` is a build error rather than a runtime crash.
+    const _: () = assert!(MAX_FRAME_SIZE <= u16::MAX as usize);
 
     /// BBQueue type for convenience
     type DefmtQueue = BBQueue<Inline<DEFMT_SINK_BUF_SIZE>, AtomicCoord, MaiNotSpsc>;
@@ -265,8 +276,17 @@ mod bbq {
         }
     }
 
-    /// Initialize bbqueue and return consumer
+    /// Initialize bbqueue and return consumer.
+    ///
+    /// Only one consumer may exist: two consumers on the same framed queue would
+    /// split the defmt stream between them and corrupt host-side decoding. Panic on
+    /// a second initialization, mirroring the RTT channel's double-init guard.
     pub(super) fn init() -> DefmtConsumer {
+        use core::sync::atomic::{AtomicBool, Ordering};
+        static CONSUMER_TAKEN: AtomicBool = AtomicBool::new(false);
+        if CONSUMER_TAKEN.swap(true, Ordering::Relaxed) {
+            panic!("defmt network sink already initialized: only one consumer may exist");
+        }
         DefmtConsumer {
             inner: <&DefmtQueue as BbqHandle>::framed_consumer(&&BBQ),
         }
@@ -340,11 +360,13 @@ mod rtt {
             !RTT_INIT.swap(true, Ordering::SeqCst),
             "defmt RTT channel already initialized — set_channel() must only be called once"
         );
-        // SAFETY: Called once during init, before any logging occurs.
-        // The AtomicBool guard above prevents double-init.
-        unsafe {
+        // Store inside a critical section so it cannot race a concurrent
+        // `write_data`, which runs inside the defmt logger's critical section — for
+        // example if a (safe) `init_rtt` call happens while an interrupt is logging.
+        // The AtomicBool guard above additionally prevents double-init.
+        critical_section::with(|_| unsafe {
             *RTT_CHANNEL.channel.get() = Some(channel);
-        }
+        });
     }
 
     /// Write data to the RTT channel.

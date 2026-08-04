@@ -100,8 +100,11 @@
 //!
 //! * If the message DOES NOT include the Any/All appendix, the Net Stack SHALL
 //!   return an "All Port Missing Key" error.
-//! * If at least one local socket OR the Profile accepts the message, the Net
-//!   Stack SHALL return success.
+//! * If at least one local socket matched the broadcast OR the Profile accepts
+//!   the message, the Net Stack SHALL return success. A matched local socket
+//!   whose bounded queue is full still counts as a recipient — the audience
+//!   exists and the message is best-effort dropped for it (at-most-once), which
+//!   is NOT a "no route" condition.
 //! * A Profile result of "No Route to Destination" or "Routing Loop" SHALL be
 //!   treated as *no external recipient* — a successful best-effort no-op, NOT a
 //!   delivery error. Because a broadcast has no single destination, "nobody is
@@ -116,7 +119,7 @@
 use mocks::{ExpectedSend, test_stack};
 
 use crate::{
-    Address, AnyAllAppendix, DEFAULT_TTL, FrameKind, Header, Key, NetStackSendError,
+    Address, AnyAllAppendix, DEFAULT_TTL, FrameKind, Header, Key, NetStackSendError, ProtocolError,
     interface_manager::InterfaceSendError,
 };
 
@@ -373,4 +376,54 @@ send_testa! {
     | bcast_no_audience_no_iroute    | broadcast_hdr | 1234u64 | inoroute        | ok            |
     | bcast_no_audience_routing_loop | broadcast_hdr | 1234u64 | iroutingloop    | ok            |
     | bcast_genuine_failure_errors   | broadcast_hdr | 1234u64 | ifull           | snoroute      |
+}
+
+/// Regression: a protocol-error send addressed to a
+/// broadcast/reserved destination port (`*:*.255`) MUST NOT panic.
+///
+/// This is remotely reachable via the router's `PacketTooBig` reply path
+/// (`profiles::router::process_frame`): a received frame whose *source* port is a
+/// reserved port (0 or 255) becomes the error reply's *destination* port, and the
+/// reply is handed to `NetStack::send_err`. An error cannot be unicast to a
+/// broadcast port, so this SHALL return a delivery error rather than crash.
+#[test]
+fn send_err_to_broadcast_port_does_not_panic() {
+    let stack = test_stack();
+    let hdr = Header {
+        src: Address::unknown(),
+        dst: Address {
+            network_id: 10,
+            node_id: 10,
+            port_id: 255,
+        },
+        any_all: None,
+        seq_no: None,
+        kind: FrameKind::PROTOCOL_ERROR,
+        ttl: DEFAULT_TTL,
+    };
+    let res = stack.send_err(&hdr, ProtocolError::IseNoRouteToDest, None);
+    assert_eq!(res, Err(NetStackSendError::NoRoute));
+    stack.manage_profile(|p| p.assert_all_empty());
+}
+
+/// A protocol-error frame handed to a normal (non-error) send path must be
+/// rejected, not panic: error frames belong on the `send_err` path.
+#[test]
+fn send_ty_with_protocol_error_kind_does_not_panic() {
+    let stack = test_stack();
+    let hdr = Header {
+        src: Address::unknown(),
+        dst: Address {
+            network_id: 10,
+            node_id: 10,
+            port_id: 10,
+        },
+        any_all: None,
+        seq_no: None,
+        kind: FrameKind::PROTOCOL_ERROR,
+        ttl: DEFAULT_TTL,
+    };
+    let res = stack.send_ty::<u64>(&hdr, &1234);
+    assert_eq!(res, Err(NetStackSendError::NoRoute));
+    stack.manage_profile(|p| p.assert_all_empty());
 }
