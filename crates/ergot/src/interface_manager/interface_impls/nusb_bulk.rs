@@ -64,17 +64,23 @@ pub async fn find_new_devices(devs: &HashSet<DeviceInfo>) -> Vec<NewDevice> {
 /// between calls to `find_new_devices_with_filter`.
 ///
 /// # Examples
-/// Filtering only on the interfaces product string
+/// Filtering only on the interface's product string
 /// ```no_run
-/// find_new_devices_with_filter(&devs, |d| d.product_string() == Some("my_custom_usb_interface"))
+/// use std::collections::HashSet;
+/// use ergot::toolkits::nusb_v0_1::{coarse_device_filter,find_new_devices_with_filter};
+/// let devices = HashSet::new();
+/// find_new_devices_with_filter(&devices, |d| d.product_string() == Some("my_custom_usb_interface"));
 /// ```
 ///
 /// 
 /// Expanding on the existing filtering by using the default filtering method [`coarse_device_filter`] as well as checking the product string
 /// ```no_run
-/// find_new_devices_with_filter(&devs, |d| {
+/// use std::collections::HashSet;
+/// use ergot::toolkits::nusb_v0_1::{coarse_device_filter,find_new_devices_with_filter};
+/// let devices = HashSet::new();
+/// find_new_devices_with_filter(&devices, |d| {
 ///     coarse_device_filter(d) || d.product_string() == Some("my_custom_usb_interface")
-/// })
+/// });
 /// ```
 pub async fn find_new_devices_with_filter<T: Fn(&nusb::DeviceInfo) -> bool>(
     devs: &HashSet<DeviceInfo>,
