@@ -5,21 +5,21 @@
 //!
 //! Since CAN-FD messages do not have a lot of bytes available, there are multiple header variants to choose from:
 //! - FULL:
-//!     This header variant is the default, it transports the same information the normal ergot [`Header`] does.
-//!     (Currently the max amount of destination network bits that get transported are 10, making the highest network ID possible 1023).
-//!     Because it transports everything it takes up some space. It allows CAN message filtering on the priority,
-//!     and the destination network ID (or at least ten bits of it), node ID and port ID
+//!   This header variant is the default, it transports the same information the normal ergot [`Header`] does.
+//!   (Currently the max amount of destination network bits that get transported are 10, making the highest network ID possible 1023).
+//!   Because it transports everything it takes up some space. It allows CAN message filtering on the priority,
+//!   and the destination network ID (or at least ten bits of it), node ID and port ID
 //! - END:
-//!     This variant uses the way ergot's networking works to it's advantage to make the header a few bytes smaller,
-//!     but it only works for networks where the CAN-FD transport is the last hop between a router and one or many direct edge nodes.
-//!     In those cases both one network ID and the TTL can be ignored.
-//!     Since it is the last hop the TTL doesn't matter anymore. Either the packet gets dropped before being sent via CAN-FD or it has arrived at it's target.
-//!     For messages that go from router to a direct edge node the destination network ID can be ignored,
-//!     since the direct edge node knows the network ID has to be the ID of the network it is connected to.
-//!     And for messages that go in the other direction (direct edge to router) the router knows that the
-//!     source network ID has to be the ID of the CAN-FD network the message was just received through.
+//!   This variant uses the way ergot's networking works to it's advantage to make the header a few bytes smaller,
+//!   but it only works for networks where the CAN-FD transport is the last hop between a router and one or many direct edge nodes.
+//!   In those cases both one network ID and the TTL can be ignored.
+//!   Since it is the last hop the TTL doesn't matter anymore. Either the packet gets dropped before being sent via CAN-FD or it has arrived at it's target.
+//!   For messages that go from router to a direct edge node the destination network ID can be ignored,
+//!   since the direct edge node knows the network ID has to be the ID of the network it is connected to.
+//!   And for messages that go in the other direction (direct edge to router) the router knows that the
+//!   source network ID has to be the ID of the CAN-FD network the message was just received through.
 //!
-//!     By using this information we can make the header a few bytes smaller without loosing any kind of data.
+//!   By using this information we can make the header a few bytes smaller without loosing any kind of data.
 //!
 //! If both of these header variants don't work for you, you have an idea on how to make the header even smaller
 //! or you need the CAN extended ID to be a specific value that has nothing to do with ergot while still transmitting ergot packages
