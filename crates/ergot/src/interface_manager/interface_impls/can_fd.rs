@@ -7,25 +7,25 @@
 //! - FULL:
 //!     This header variant is the default, it transports the same information the normal ergot [`Header`] does.
 //!     (Currently the max amount of destination network bits that get transported are 10, making the highest network ID possible 1023).
-//!     Because it transports everything it takes up some space. It allows CAN message filtering on the priority, 
+//!     Because it transports everything it takes up some space. It allows CAN message filtering on the priority,
 //!     and the destination network ID (or at least ten bits of it), node ID and port ID
 //! - END:
-//!     This variant uses the way ergot's networking works to it's advantage to make the header a few bytes smaller, 
+//!     This variant uses the way ergot's networking works to it's advantage to make the header a few bytes smaller,
 //!     but it only works for networks where the CAN-FD transport is the last hop between a router and one or many direct edge nodes.
 //!     In those cases both one network ID and the TTL can be ignored.
 //!     Since it is the last hop the TTL doesn't matter anymore. Either the packet gets dropped before being sent via CAN-FD or it has arrived at it's target.
-//!     For messages that go from router to a direct edge node the destination network ID can be ignored, 
+//!     For messages that go from router to a direct edge node the destination network ID can be ignored,
 //!     since the direct edge node knows the network ID has to be the ID of the network it is connected to.
-//!     And for messages that go in the other direction (direct edge to router) the router knows that the 
+//!     And for messages that go in the other direction (direct edge to router) the router knows that the
 //!     source network ID has to be the ID of the CAN-FD network the message was just received through.
-//! 
+//!
 //!     By using this information we can make the header a few bytes smaller without loosing any kind of data.
-//! 
-//! If both of these header variants don't work for you, you have an idea on how to make the header even smaller 
+//!
+//! If both of these header variants don't work for you, you have an idea on how to make the header even smaller
 //! or you need the CAN extended ID to be a specific value that has nothing to do with ergot while still transmitting ergot packages
 //! you can build a new header variant yourself by implementing the [`CANHeader`] trait.
 //!
-//! 
+//!
 //! ## CAN Extended ID Layout (29 bits) in FULL mode
 //!
 //! ```text
@@ -98,7 +98,6 @@
 //! For a typical message with low network IDs:
 //! - Standard ergot header: ~12-14 bytes
 //! - CAN FD optimized: ~3-5 bytes in payload (rest in CAN ID)
-
 
 // ============================================================================
 // Constants
@@ -209,7 +208,7 @@ where
     fn to_raw_unchecked(&self) -> u32;
 
     fn to_raw(&self) -> u32 {
-        Self::to_raw_unchecked(&self) & Self::MAX_EXTENDED_ID
+        Self::to_raw_unchecked(self) & Self::MAX_EXTENDED_ID
     }
 }
 
@@ -456,7 +455,7 @@ pub struct CanPayloadHeaderFULL {
     src_node: u8,
     src_port: u8,
     ttl: u8,
-    kind: u8
+    kind: u8,
 }
 
 impl CanPayloadHeader for CanPayloadHeaderFULL {
@@ -466,7 +465,7 @@ impl CanPayloadHeader for CanPayloadHeaderFULL {
             src_node: hdr.src.node_id,
             src_port: hdr.src.port_id,
             ttl: hdr.ttl,
-            kind: frame_kind_to_bits(hdr.kind)
+            kind: frame_kind_to_bits(hdr.kind),
         }
     }
 }
@@ -1074,13 +1073,14 @@ mod tests {
             let body: u32 = 0x12345678;
             let mut buf = [0u8; CAN_FD_MAX_PAYLOAD];
 
-            let (can_id, len) = encode_frame::<u32, END>(&hdr, &body, CanPriority::High, &mut buf).unwrap();
+            let (can_id, len) =
+                encode_frame::<u32, END>(&hdr, &body, CanPriority::High, &mut buf).unwrap();
 
             // Decode
             let decoded = decode_frame::<END>(can_id, &buf[..len]).unwrap();
 
             // assert_eq!(decoded.header.src, hdr.src); //TODO: Fix these two asserts. They currently fail because for the END header variant the network ID we encode/decode depends on the direction in the network we are going (router -> bus node or router <- bus node). See explanation at the top
-            // assert_eq!(decoded.header.dst, hdr.dst); 
+            // assert_eq!(decoded.header.dst, hdr.dst);
             assert_eq!(decoded.header.kind, hdr.kind);
             // assert_eq!(decoded.header.ttl, hdr.ttl); //TODO: We reset the TTL for the END variant as well. We'll need to rewrite this test
 
@@ -1092,7 +1092,8 @@ mod tests {
         #[test]
         fn test_priority_ordering() {
             // Lower CAN ID = higher priority in CAN arbitration
-            let high = CanFrameIdEND::new(CanPriority::Critical, 10, 10, FrameKind::ENDPOINT_REQ, 0);
+            let high =
+                CanFrameIdEND::new(CanPriority::Critical, 10, 10, FrameKind::ENDPOINT_REQ, 0);
             let low = CanFrameIdEND::new(CanPriority::Lowest, 10, 10, FrameKind::ENDPOINT_REQ, 0);
 
             assert!(high.to_raw() < low.to_raw());
@@ -1228,7 +1229,8 @@ mod tests {
             let total_len = hdr_len + err_len;
 
             // Error to port 0 (any)
-            let can_id = CanFrameIdEND::new(CanPriority::Normal, 10, 0, FrameKind::PROTOCOL_ERROR, 0);
+            let can_id =
+                CanFrameIdEND::new(CanPriority::Normal, 10, 0, FrameKind::PROTOCOL_ERROR, 0);
             let result = decode_frame::<END>(can_id.to_raw(), &buf[..total_len]);
             assert_eq!(
                 result.err(),
@@ -1237,7 +1239,8 @@ mod tests {
             );
 
             // Error to port 255 (all)
-            let can_id = CanFrameIdEND::new(CanPriority::Normal, 10, 255, FrameKind::PROTOCOL_ERROR, 0);
+            let can_id =
+                CanFrameIdEND::new(CanPriority::Normal, 10, 255, FrameKind::PROTOCOL_ERROR, 0);
             let result = decode_frame::<END>(can_id.to_raw(), &buf[..total_len]);
             assert_eq!(
                 result.err(),
@@ -1246,7 +1249,8 @@ mod tests {
             );
 
             // Error to specific port should be accepted
-            let can_id = CanFrameIdEND::new(CanPriority::Normal, 10, 42, FrameKind::PROTOCOL_ERROR, 0);
+            let can_id =
+                CanFrameIdEND::new(CanPriority::Normal, 10, 42, FrameKind::PROTOCOL_ERROR, 0);
             let result = decode_frame::<END>(can_id.to_raw(), &buf[..total_len]);
             assert!(
                 result.is_ok(),
@@ -1334,7 +1338,8 @@ mod tests {
             let body: u32 = 0x12345678;
             let mut buf = [0u8; CAN_FD_MAX_PAYLOAD];
 
-            let (can_id, len) = encode_frame::<u32, FULL>(&hdr, &body, CanPriority::High, &mut buf).unwrap();
+            let (can_id, len) =
+                encode_frame::<u32, FULL>(&hdr, &body, CanPriority::High, &mut buf).unwrap();
 
             // Decode
             let decoded = decode_frame::<FULL>(can_id, &buf[..len]).unwrap();
@@ -1480,7 +1485,7 @@ mod tests {
                 src_node: 2,
                 src_port: 3,
                 ttl: 16,
-                kind: frame_kind_to_bits(FrameKind::PROTOCOL_ERROR)
+                kind: frame_kind_to_bits(FrameKind::PROTOCOL_ERROR),
             };
             let mut buf = [0u8; 32];
             let hdr_len = postcard::to_slice(&payload_hdr, &mut buf).unwrap().len();
