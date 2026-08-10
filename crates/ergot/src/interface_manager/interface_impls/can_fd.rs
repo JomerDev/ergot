@@ -5,7 +5,7 @@
 //!
 //! Since CAN-FD messages do not have a lot of bytes available, there are multiple header variants to choose from:
 //! - FULL:
-//!   This header variant is the default, it transports the same information the normal ergot [`Header`] does.
+//!   This header variant is the default, it transports the same information the normal ergot [`HeaderSeq`] does.
 //!   (Currently the max amount of destination network bits that get transported are 10, making the highest network ID possible 1023).
 //!   Because it transports everything it takes up some space. It allows CAN message filtering on the priority,
 //!   and the destination network ID (or at least ten bits of it), node ID and port ID
