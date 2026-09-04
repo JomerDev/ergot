@@ -34,7 +34,9 @@
 //!
 //! [`NetStack`]: crate::NetStack
 
-use crate::{Header, HeaderSeq, NetStackSendError, ProtocolError, net_stack::ReqRespError, wire_frames};
+use crate::{
+    Header, HeaderSeq, NetStackSendError, ProtocolError, net_stack::ReqRespError, wire_frames,
+};
 use postcard_schema::Schema;
 use serde::{Deserialize, Serialize};
 
@@ -497,7 +499,7 @@ pub trait InterfaceSink {
     /// The max size the header used by this interface can be after encoding
     /// Useful to calculate how big a message is allowed to be to be guaranteed to fit
     fn max_header_size(&self) -> usize {
-        Self::MAX_HEADER_SIZE    
+        Self::MAX_HEADER_SIZE
     }
 
     fn send_ty<T: Serialize>(&mut self, hdr: &HeaderSeq, body: &T) -> Result<(), ()>;
@@ -624,7 +626,7 @@ pub enum FragmentRequestError {
     // The service has no free buffer to assemble the fragmented message
     NoFreeSlot,
     // Assembled message is larger than the maximum message size we expect
-    MsgTooBig
+    MsgTooBig,
 }
 
 /// An error occurred when sending a packet of a fragmented message

@@ -8,10 +8,15 @@ use embassy_futures::{
 use crate::fmtlog::ErgotFmtRxOwned;
 use crate::{
     interface_manager::{
-        Profile, utils::fragmentation_sink::{
-            FragmentationConfig, FragmentationIssueHandler, handle_incomming_fragmentation_packets, handle_outgoing_fragmentation_packets,
+        Profile,
+        utils::fragmentation_sink::{
+            FragmentationConfig, FragmentationIssueHandler, handle_incomming_fragmentation_packets,
+            handle_outgoing_fragmentation_packets,
         },
-    }, net_stack::{NetStackHandle, endpoints::Endpoints, topics::Topics}, socket::HeaderMessage, well_known::{
+    },
+    net_stack::{NetStackHandle, endpoints::Endpoints, topics::Topics},
+    socket::HeaderMessage,
+    well_known::{
         AddressClaimGranted, AddressClaimRequest, AddressRefreshRequest, DeviceInfo,
         ErgotAddressClaimEndpoint, ErgotAddressRefreshEndpoint, ErgotDeviceInfoInterrogationTopic,
         ErgotDeviceInfoTopic, ErgotPingEndpoint, ErgotSeedRouterAssignmentEndpoint,
@@ -307,7 +312,6 @@ impl<NS: NetStackHandle> Services<NS> {
         Q::Notifier: AsyncNotifier,
         H: FragmentationIssueHandler,
     {
-
         let nsh = self.inner.clone();
         let FragmentationConfig {
             receive_buffer,
@@ -316,26 +320,13 @@ impl<NS: NetStackHandle> Services<NS> {
         } = config;
 
         join(
-            handle_incomming_fragmentation_packets::<
-                Q,
-                P,
-                H,
-                NS,
-                D,
-                MTU,
-                N,
-                SIZE,
-                REGISTRY_SIZE,
-            >(nsh.clone(), receive_buffer, ident, handler.clone()),
-            handle_outgoing_fragmentation_packets::<
-                Q,
-                P,
-                H,
-                NS,
-                D,
-                MTU,
-                SIZE,
-            >(nsh ,cons, handler ),
+            handle_incomming_fragmentation_packets::<Q, P, H, NS, D, MTU, N, SIZE, REGISTRY_SIZE>(
+                nsh.clone(),
+                receive_buffer,
+                ident,
+                handler.clone(),
+            ),
+            handle_outgoing_fragmentation_packets::<Q, P, H, NS, D, MTU, SIZE>(nsh, cons, handler),
         )
         .await;
     }

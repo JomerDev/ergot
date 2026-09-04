@@ -12,12 +12,17 @@ use postcard::{
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    Address, AnyAllAppendix, HeaderSeq, interface_manager::{
+    Address, AnyAllAppendix, HeaderSeq,
+    interface_manager::{
         FragmentError, FragmentPacketError, FragmentRequestError, Interface, InterfaceSink, Profile,
-    }, logging::{error, trace, warn}, net_stack::NetStackHandle, well_known::{
+    },
+    logging::{error, trace, warn},
+    net_stack::NetStackHandle,
+    well_known::{
         ErgotFragmentPacketEndpoint, ErgotFragmentRequestEndpoint, FragmentPacket, FragmentRequest,
         FragmentRequestResponse,
-    }, wire_frames::{self, CommonHeader, de_frame, encode_frame_hdr},
+    },
+    wire_frames::{self, CommonHeader, de_frame, encode_frame_hdr},
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -26,7 +31,7 @@ pub(crate) struct FragmentationHeader {
     dst: Address,
 }
 
-/// How the fragmentation service should handle a non-fatal issue that has come up 
+/// How the fragmentation service should handle a non-fatal issue that has come up
 pub enum FragmentationIssueResolution {
     Retry,
     Drop,
@@ -147,7 +152,7 @@ where
         if msg_size > max_inner_msg_size {
             if hdr.dst.port_id == 255 {
                 error!("The fragmentation sink does not support the fragmentation of broadcasts");
-                return Err(())
+                return Err(());
             }
             let mut wgr = self
                 .prod
@@ -191,7 +196,7 @@ where
         if msg_size > max_inner_msg_size {
             if hdr.dst.port_id == 255 {
                 error!("The fragmentation sink does not support the fragmentation of broadcasts");
-                return Err(())
+                return Err(());
             }
             let mut wgr = self
                 .prod
@@ -221,7 +226,6 @@ where
     }
 
     fn send_raw(&mut self, hdr: &crate::prelude::HeaderSeq, body: &[u8]) -> Result<(), ()> {
-
         let max_inner_msg_size = if self.any_handling && hdr.any_all.is_none() {
             self.max_inner_msg_size + size_of::<AnyAllAppendix>()
         } else {
@@ -231,7 +235,7 @@ where
         if body.len() > max_inner_msg_size {
             if hdr.dst.port_id == 255 {
                 error!("The fragmentation sink does not support the fragmentation of broadcasts");
-                return Err(())
+                return Err(());
             }
             let mut wgr = self
                 .prod
@@ -282,8 +286,8 @@ where
     Q: BbqHandle,
     H: FragmentationIssueHandler,
 {
-    /// Creates a new [`FragmentationSinkBuilder`] to create a fragmentation sink. 
-    /// 
+    /// Creates a new [`FragmentationSinkBuilder`] to create a fragmentation sink.
+    ///
     /// Receives a [`FragmentationIssueHandler`]. If it's not used [`DefaultFragmentationIssueHandler`] can be passed
     pub fn new(handler: H) -> Self {
         Self {
@@ -307,7 +311,7 @@ where
     }
 
     /// If the fragmentation sink should take the Any header appendix into account when checking if a message can fit into the underlying sink
-    /// 
+    ///
     /// Needs to be set to false in case the inner sink does any special encoding of the Any header appendix
     pub fn with_any_handling(&mut self, handle_any_all: bool) -> &mut Self {
         self.any_handling = handle_any_all;
@@ -330,7 +334,6 @@ where
 
         let () = assert!(inner_sink.is_some(), "An inner Sink must be provided");
         let () = assert!(queue_handle.is_some(), "A queue handle must be provided");
-
 
         let inner_sink = inner_sink.expect("An inner Sink must be provided");
         let queue_handle = queue_handle.expect("A queue handle must be provided");
@@ -432,8 +435,7 @@ pub(crate) async fn handle_incomming_fragmentation_packets<
                 };
                 trace!(
                     "Received a fragment request {:?}, answering with {:?}",
-                    msg,
-                    resp
+                    msg, resp
                 );
                 _ = endpoints
                     .clone()
@@ -506,7 +508,6 @@ pub(crate) async fn handle_incomming_fragmentation_packets<
                 if let Err(e) = res {
                     handler.handle_error(FragmentError::NetStack(e));
                 }
-
             }
         }
     }
@@ -540,7 +541,9 @@ pub(crate) async fn handle_outgoing_fragmentation_packets<
         let Ok((header, rem)) = result else {
             // Something went wrong when reading the header, we're dropping the packet
             error!("Could not read fragmentation header, dropping packet");
-            handler.handle_error(FragmentError::ParseHeader(result.expect_err("We already checked that the result is an error")));
+            handler.handle_error(FragmentError::ParseHeader(
+                result.expect_err("We already checked that the result is an error"),
+            ));
             grant.release();
             continue;
         };
@@ -566,7 +569,8 @@ pub(crate) async fn handle_outgoing_fragmentation_packets<
                     match res {
                         Ok(resp) => break Ok(resp),
                         Err(e) => {
-                            let handle_as = handler.handle_issue(FragmentError::Request(e), dst).await;
+                            let handle_as =
+                                handler.handle_issue(FragmentError::Request(e), dst).await;
                             match handle_as {
                                 FragmentationIssueResolution::Drop => continue 'outer, // Could not get a buffer_id to send to, so we're dropping the message
                                 FragmentationIssueResolution::Retry => continue 'buffer_grant, // Retry
@@ -577,13 +581,17 @@ pub(crate) async fn handle_outgoing_fragmentation_packets<
                         }
                     }
                 } else {
-                    break Err(FragmentError::Transport(ans.expect_err("We already tested that the value is an error")));
+                    break Err(FragmentError::Transport(
+                        ans.expect_err("We already tested that the value is an error"),
+                    ));
                 }
             }
         };
 
         let Ok(FragmentRequestResponse { buffer_id, port }) = response else {
-            handler.handle_error(response.expect_err("We already checked if the response is an error"));
+            handler.handle_error(
+                response.expect_err("We already checked if the response is an error"),
+            );
             grant.release();
             continue;
         };
@@ -616,7 +624,7 @@ pub(crate) async fn handle_outgoing_fragmentation_packets<
                     FragmentationIssueResolution::RaiseError => {
                         handler.handle_error(FragmentError::HandlerRaised);
                         break;
-                    },
+                    }
                     FragmentationIssueResolution::Retry => continue,
                 }
             }
@@ -625,8 +633,8 @@ pub(crate) async fn handle_outgoing_fragmentation_packets<
     }
 }
 
-/// Calculates the `BAR_SIZE` constant 
-/// 
+/// Calculates the `BAR_SIZE` constant
+///
 /// `BAR_SIZE` being the max size the Byte ARray in a [`FragmentPacket`] might have based on the underlying sink
 pub const fn calc_barray_size<I: Interface, Q: BbqHandle, const MTU: usize>() -> usize
 where
@@ -637,7 +645,7 @@ where
 }
 
 /// Calculates the `REGISTRY_SIZE` constant
-/// 
+///
 /// `REGISTRY_SIZE` being the number of [`FragmentPacket`]s that are needed to fully send a message of `MTU` size
 pub const fn calc_registry_size<const MTU: usize, const BAR_SIZE: usize>() -> usize {
     MTU.div_ceil(BAR_SIZE).div_ceil(8)

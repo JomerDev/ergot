@@ -5,18 +5,30 @@
 use std::{assert_matches, pin::pin, time::Duration};
 
 use ergot::{
-    endpoint, interface_manager::{
-        InterfaceState, interface_impls::tokio_stream::TokioStreamInterface, profiles::direct_edge::{CENTRAL_NODE_ID, DirectEdge, EDGE_NODE_ID, EdgeFrameProcessor}, transports::tokio_cobs_stream, utils::{
-            cobs_stream, fragmentation_sink::{
-                DefaultFragmentationIssueHandler, FragmentationSinkBuilder, FragmentationSinkInterface, calc_barray_size, calc_registry_size,
-            }, std::StdQueue,
+    endpoint,
+    interface_manager::{
+        InterfaceState,
+        interface_impls::tokio_stream::TokioStreamInterface,
+        profiles::direct_edge::{CENTRAL_NODE_ID, DirectEdge, EDGE_NODE_ID, EdgeFrameProcessor},
+        transports::tokio_cobs_stream,
+        utils::{
+            cobs_stream,
+            fragmentation_sink::{
+                DefaultFragmentationIssueHandler, FragmentationSinkBuilder,
+                FragmentationSinkInterface, calc_barray_size, calc_registry_size,
+            },
+            std::StdQueue,
         },
-    }, net_stack::ArcNetStack, toolkits::tokio_stream::{
-        self as stream_kit,
-    }, well_known::ErgotPingEndpoint,
+    },
+    net_stack::ArcNetStack,
+    toolkits::tokio_stream::{self as stream_kit},
+    well_known::ErgotPingEndpoint,
 };
 use mutex::raw_impls::cs::CriticalSectionRawMutex;
-use tokio::{select, time::{sleep, timeout}};
+use tokio::{
+    select,
+    time::{sleep, timeout},
+};
 
 const INNER_MTU: usize = 64;
 const MTU: usize = 1024;
@@ -132,7 +144,9 @@ async fn fragmentation_test() {
     let ctrl_queue = stream_kit::new_std_queue(4096);
     let frag_queue = stream_kit::new_std_queue(4096);
     let mut frag_sink_builder =
-        FragmentationSinkBuilder::<_, _, _, MTU, 1, SIZE, REGISTRY_SIZE>::new(DefaultFragmentationIssueHandler);
+        FragmentationSinkBuilder::<_, _, _, MTU, 1, SIZE, REGISTRY_SIZE>::new(
+            DefaultFragmentationIssueHandler,
+        );
     frag_sink_builder.with_bbqueue(Some(frag_queue));
     frag_sink_builder.with_sink(cobs_stream::Sink::new_from_handle(
         ctrl_queue.clone(),
@@ -147,7 +161,9 @@ async fn fragmentation_test() {
     let tgt_queue = stream_kit::new_std_queue(4096);
     let tgt_frag_queue = stream_kit::new_std_queue(4096);
     let mut tgt_frag_sink_builder =
-        FragmentationSinkBuilder::<_, _, _, MTU, 1, SIZE, REGISTRY_SIZE>::new(DefaultFragmentationIssueHandler);
+        FragmentationSinkBuilder::<_, _, _, MTU, 1, SIZE, REGISTRY_SIZE>::new(
+            DefaultFragmentationIssueHandler,
+        );
     tgt_frag_sink_builder.with_bbqueue(Some(tgt_frag_queue));
     tgt_frag_sink_builder.with_sink(cobs_stream::Sink::new_from_handle(
         tgt_queue.clone(),

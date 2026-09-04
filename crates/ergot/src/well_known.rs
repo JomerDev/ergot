@@ -12,7 +12,8 @@ use crate::logging::defmtlog::ErgotDefmtRxOwned;
 use crate::logging::defmtlog::{ErgotDefmtRx, ErgotDefmtTx};
 
 use crate::interface_manager::{
-    AddressClaimError, AddressRefreshError, FragmentPacketError, FragmentRequestError, NodeClaimAssignment, SeedAssignmentError, SeedNetAssignment, SeedRefreshError,
+    AddressClaimError, AddressRefreshError, FragmentPacketError, FragmentRequestError,
+    NodeClaimAssignment, SeedAssignmentError, SeedNetAssignment, SeedRefreshError,
 };
 use crate::nash::NameHash;
 use crate::{Address, FrameKind, endpoint, topic};
@@ -215,7 +216,6 @@ pub struct PathMtuResult {
     pub path_mtu: u16,
 }
 
-
 #[derive(Debug, Serialize, Deserialize, Schema, Clone, PartialEq)]
 pub struct FragmentRequest {
     pub complete_size: u16,
@@ -234,15 +234,18 @@ pub struct FragmentPacket<const SIZE: usize> {
     pub buffer_id: u8,
     pub packet_idx: u16,
     #[serde_as(as = "[_; SIZE]")]
-    pub data: [u8; SIZE]
+    pub data: [u8; SIZE],
 }
-
 
 type FragmentRequestResponseResult = Result<FragmentRequestResponse, FragmentRequestError>;
 type FragmentPacketResponse = Result<(), FragmentPacketError>;
 
-endpoint!(ErgotFragmentRequestEndpoint, FragmentRequest, FragmentRequestResponseResult, "ergot/.well-known/fragment/request");
-
+endpoint!(
+    ErgotFragmentRequestEndpoint,
+    FragmentRequest,
+    FragmentRequestResponseResult,
+    "ergot/.well-known/fragment/request"
+);
 
 // Implemented by hand since the [`endpoint!`] macro doesn't like const generics
 pub struct ErgotFragmentPacketEndpoint<const SIZE: usize> {
