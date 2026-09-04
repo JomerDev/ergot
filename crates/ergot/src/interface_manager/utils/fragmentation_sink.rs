@@ -334,12 +334,15 @@ where
 
         let () = assert!(inner_sink.is_some(), "An inner Sink must be provided");
         let () = assert!(queue_handle.is_some(), "A queue handle must be provided");
-        
+
         let inner_sink = inner_sink.expect("An inner Sink must be provided");
         let queue_handle = queue_handle.expect("A queue handle must be provided");
         let max_inner_msg_size = size_of::<FragmentPacket<BAR_SIZE>>();
-        
-        assert!(size_of::<FragmentPacket<0>>() < inner_sink.mtu() as usize, "The overhead of the fragmentation messages is larger as the MTU of the inner sink");
+
+        assert!(
+            size_of::<FragmentPacket<0>>() < inner_sink.mtu() as usize,
+            "The overhead of the fragmentation messages is larger as the MTU of the inner sink"
+        );
 
         (
             Sink {
