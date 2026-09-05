@@ -643,7 +643,6 @@ pub enum FragmentPacketError {
 
 /// An error that can occur in the fragmentation sink
 #[derive(Debug, PartialEq)]
-#[cfg_attr(feature = "defmt-v1", derive(defmt::Format))]
 pub enum FragmentError {
     Request(FragmentRequestError),
     Packet(FragmentPacketError),

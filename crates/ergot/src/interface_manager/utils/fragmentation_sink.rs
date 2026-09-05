@@ -65,6 +65,14 @@ impl<const MTU: usize, const REGISTRY_SIZE: usize> FragmentationBuffer<MTU, REGI
     }
 }
 
+impl<const MTU: usize, const REGISTRY_SIZE: usize> Default
+    for FragmentationBuffer<MTU, REGISTRY_SIZE>
+{
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 pub trait FragmentationIssueHandler: Clone {
     fn handle_issue(
         &self,
@@ -318,7 +326,7 @@ where
         self
     }
 
-    /// Creates the fragmentation sink as well as a fragmentation config to pass to the [`Services::fragmented_message_handler`]
+    /// Creates the fragmentation sink as well as a fragmentation config to pass to the fragmented_message_handler
     pub fn generate(
         self,
     ) -> (
@@ -346,7 +354,7 @@ where
 
         (
             Sink {
-                inner_sink: inner_sink,
+                inner_sink,
                 prod: queue_handle.framed_producer(),
                 max_inner_msg_size,
                 mtu: MTU as u16,
@@ -371,7 +379,6 @@ where
 /// The part of the fragmentation service that handles all incomming messages (fragmentation requests and fragment packets)
 pub(crate) async fn handle_incomming_fragmentation_packets<
     Q,
-    P,
     H,
     NS,
     const D: usize,
@@ -419,12 +426,12 @@ pub(crate) async fn handle_incomming_fragmentation_packets<
                     Err(FragmentRequestError::MsgTooBig)
                 } else {
                     let mut index = usize::MAX;
-                    for idx in 0..receive_buffers.len() {
-                        if !receive_buffers[idx].reserved {
-                            receive_buffers[idx].reserved = true;
-                            receive_buffers[idx].complete_size = msg.t.complete_size;
-                            receive_buffers[idx].packet_size = msg.t.packet_data_size;
-                            receive_buffers[idx].received_size = 0;
+                    for (idx, receive_buffer) in receive_buffers.iter_mut().enumerate() {
+                        if !receive_buffer.reserved {
+                            receive_buffer.reserved = true;
+                            receive_buffer.complete_size = msg.t.complete_size;
+                            receive_buffer.packet_size = msg.t.packet_data_size;
+                            receive_buffer.received_size = 0;
                             index = idx;
                             break;
                         }
@@ -475,8 +482,7 @@ pub(crate) async fn handle_incomming_fragmentation_packets<
                         buffer_info.buffer[(addr as usize)..(addr + len) as usize]
                             .copy_from_slice(&msg.t.data[..(len as usize)]);
                         // Set the bit in the registry so we can make sure that we don't process a package twice
-                        buffer_info.registry[registry_idx as usize] =
-                            buffer_info.registry[registry_idx as usize] | byte;
+                        buffer_info.registry[registry_idx as usize] |= byte;
 
                         buffer_info.received_size += len;
                         if buffer_info.received_size == buffer_info.complete_size {
@@ -521,7 +527,6 @@ pub(crate) async fn handle_incomming_fragmentation_packets<
 /// The part of the fragmentation service that handles all outgoing messages (requesting a buffer and sending fragment packets)
 pub(crate) async fn handle_outgoing_fragmentation_packets<
     Q,
-    P,
     H,
     NS,
     const D: usize,

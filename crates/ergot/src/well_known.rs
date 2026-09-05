@@ -251,7 +251,7 @@ endpoint!(
 pub struct ErgotFragmentPacketEndpoint<const SIZE: usize> {
     _priv: core::marker::PhantomData<()>,
 }
-impl<'a, const SIZE: usize> crate::traits::Endpoint for ErgotFragmentPacketEndpoint<SIZE> {
+impl<const SIZE: usize> crate::traits::Endpoint for ErgotFragmentPacketEndpoint<SIZE> {
     type Request = FragmentPacket<SIZE>;
     type Response = FragmentPacketResponse;
     const PATH: &'static str = "ergot/.well-known/fragment/packet";
